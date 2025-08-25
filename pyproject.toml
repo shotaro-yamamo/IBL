@@ -1,5 +1,5 @@
 [project]
-name = "IBL"
+name = "ibl-utils"
 version = "0.1.0"
 description = "Jupyter: checkbox + progress UI (hard-coded steps)"
 requires-python = ">=3.9"

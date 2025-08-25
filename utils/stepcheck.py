@@ -1,112 +1,57 @@
+# IBL/utils/stepcheck.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Optional
 
-try:
-    import ipywidgets as widgets
-except Exception as e:
-    raise RuntimeError("ipywidgets>=8 が必要です。") from e
-
-from IPython import get_ipython
 from IPython.display import display
-
-# ==== ハードコーディングしたステップ一覧 ====
-STEPS = [
-    "1. GPU確認",
-    "2. ライブラリ導入",
-    "3. 外部ストレージ準備",
-    "4. モデルロード(7B)",
-    "5. スモークテスト",
-    "6. API起動",
-]
-TITLE = "実行チェックリスト"
-STEP_COMMENT_PREFIX = "# STEP:"
+from ipywidgets import HTML, Checkbox, IntProgress, Layout, VBox
 
 
-@dataclass
-class StepState:
-    ok: bool = False
-    msg: str = ""
-    ts: Optional[str] = None
+class StepCheck:
+    """
+    チェックボックス＋進行度だけを表示し、更新はコード側から行うシンプルUI。
+    手順リストはハードコーディング。
+    """
+    # ハードコーディングされた手順
+    DEFAULT_STEPS = ["GPU確認", "データ読み込み", "前処理", "学習", "評価"]
 
+    def __init__(self, title: str = "処理フロー", progress_max: int = 100) -> None:
+        self.title: str = title
+        self.step_labels: List[str] = list(self.DEFAULT_STEPS)
 
-class StepTracker:
-    def __init__(self, steps: List[str]):
-        self.steps = steps
-        self.state: Dict[str, StepState] = {s: StepState() for s in steps}
-        self._checks = {s: widgets.Checkbox(description=s, value=False, disabled=True) for s in steps}
-        self._notes = {s: widgets.HTML("") for s in steps}
-        self._rows = widgets.VBox([widgets.HBox([self._checks[s], self._notes[s]]) for s in steps])
-        self._bar = widgets.IntProgress(value=0, min=0, max=len(steps), description="Progress")
-        self.panel = widgets.VBox([widgets.HTML(f"<h3>{TITLE}</h3>"), self._rows, self._bar])
+        self._steps = [Checkbox(description=s, indent=False) for s in self.step_labels]
+        self._progress = IntProgress(min=0, max=int(progress_max), value=0, layout=Layout(width="100%"))
+        self._progress_label = HTML(f"進行度: 0/{int(progress_max)} (0%)")
 
-    def show(self): display(self.panel); self._refresh()
-    def done(self, step: str, msg: str = ""):
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.state[step] = StepState(True, msg, ts)
-        self._checks[step].value = True
-        self._notes[step].value = f"<span style='color:gray'>OK @ {ts} {msg}</span>"
-        self._refresh()
-    def fail(self, step: str, err: Union[Exception,str]):
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.state[step] = StepState(False, str(err), ts)
-        self._checks[step].value = False
-        self._notes[step].value = f"<span style='color:#d33'>NG @ {ts} — {err}</span>"
-        self._refresh()
-    def all_done(self) -> bool: return all(st.ok for st in self.state.values())
-    def summary(self) -> Dict[str, Dict[str, Any]]:
-        return {k: {"ok": v.ok, "msg": v.msg, "ts": v.ts} for k,v in self.state.items()}
-    def _refresh(self):
-        okc = sum(1 for st in self.state.values() if st.ok)
-        self._bar.value = okc
-        self._bar.bar_style = "success" if okc == len(self.steps) else ("info" if okc>0 else "")
+        self._ui = VBox(
+            [
+                HTML(f"<h3 style='margin:6px 0;'>{self.title}</h3>"),
+                VBox(self._steps),
+                self._progress,
+                self._progress_label,
+            ],
+            layout=Layout(gap="8px"),
+        )
 
+    # --- 表示 ---
+    def display(self) -> None:
+        display(self._ui)
 
-# === モジュールスコープ ===
-_tracker: Optional[StepTracker] = None
-_registered = False
+    # --- 更新API ---
+    def mark(self, label: str, checked: bool = True) -> bool:
+        cb = next((cb for cb in self._steps if cb.description == label), None)
+        if cb is None:
+            return False
+        cb.value = bool(checked)
+        return True
 
-def get_tracker() -> StepTracker:
-    if _tracker is None:
-        raise RuntimeError("stepcheck: not initialized")
-    return _tracker
+    def set_progress(self, value: int) -> None:
+        v = max(self._progress.min, min(self._progress.max, int(value)))
+        self._progress.value = v
+        percent = int(round(100 * v / max(1, self._progress.max)))
+        self._progress_label.value = f"進行度: {v}/{self._progress.max} ({percent}%)"
 
-def all_done(): return get_tracker().all_done()
-def summary(): return get_tracker().summary()
-def done(step, msg=""): get_tracker().done(step, msg)
-def fail(step, err): get_tracker().fail(step, err)
-
-# === IPython拡張 ===
-def load_ipython_extension(ip):
-    global _tracker, _registered
-    if _tracker is None:
-        _tracker = StepTracker(STEPS)
-        _tracker.show()
-
-    # %%step <name>
-    from IPython.core.magic import register_cell_magic
-    @register_cell_magic
-    def step(line, cell):
-        name = (line or "").strip()
-        res = ip.run_cell(cell)
-        if getattr(res, "success", False): _tracker.done(name)
-        else: _tracker.fail(name, getattr(res, "error_in_exec", None) or "Execution failed")
-
-    if not _registered:
-        def _after(result):
-            try:
-                ih = ip.user_ns.get("_ih", [""])
-                src = ih[-1] if ih else ""
-                first = src.splitlines()[0].strip() if src else ""
-                if first.startswith(STEP_COMMENT_PREFIX):
-                    name = first.split(":",1)[1].strip()
-                    if getattr(result, "success", False): _tracker.done(name)
-                    else: _tracker.fail(name, getattr(result, "error_in_exec", None) or "Execution failed")
-            except: pass
-        ip.events.register("post_run_cell", _after)
-        _registered = True
-
-def unload_ipython_extension(ip): pass
+    def reset(self) -> None:
+        for cb in self._steps:
+            cb.value = False
+        self.set_progress(0)

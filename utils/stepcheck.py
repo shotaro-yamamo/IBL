@@ -1,4 +1,3 @@
-# IBL/utils/stepcheck.py
 from __future__ import annotations
 
 from typing import List, Optional
@@ -9,49 +8,69 @@ from ipywidgets import HTML, Checkbox, IntProgress, Layout, VBox
 
 class StepCheck:
     """
-    チェックボックス＋進行度だけを表示し、更新はコード側から行うシンプルUI。
-    手順リストはハードコーディング。
+    チェックボックス + 進行度バーのみを表示するJupyter用最小UI。
+    - 手順リストは**ハードコーディング**（変更UIなし）
+    - 手動操作UI（ボタン等）は提供しない
+    - 更新はコード側から mark()/set_progress() を呼ぶ
     """
-    # ハードコーディングされた手順
-    DEFAULT_STEPS = ["GPU確認", "データ読み込み", "前処理", "学習", "評価"]
+
+    # ハードコーディングされた手順（変更不要）
+    DEFAULT_STEPS: List[str] = ["GPU確認", "データ読み込み", "前処理", "学習", "評価"]
 
     def __init__(self, title: str = "処理フロー", progress_max: int = 100) -> None:
-        self.title: str = title
-        self.step_labels: List[str] = list(self.DEFAULT_STEPS)
+        self.title = title
+        self.progress_max = int(progress_max)
 
-        self._steps = [Checkbox(description=s, indent=False) for s in self.step_labels]
-        self._progress = IntProgress(min=0, max=int(progress_max), value=0, layout=Layout(width="100%"))
-        self._progress_label = HTML(f"進行度: 0/{int(progress_max)} (0%)")
+        # ウィジェット
+        self._steps = [Checkbox(description=s, indent=False) for s in self.DEFAULT_STEPS]
+        self._progress = IntProgress(min=0, max=self.progress_max, value=0, layout=Layout(width="100%"))
+        self._label = HTML(self._label_text(0))
 
+        # レイアウト（チェックボックス + 進行度のみ）
         self._ui = VBox(
             [
                 HTML(f"<h3 style='margin:6px 0;'>{self.title}</h3>"),
                 VBox(self._steps),
                 self._progress,
-                self._progress_label,
+                self._label,
             ],
             layout=Layout(gap="8px"),
         )
 
-    # --- 表示 ---
+    # ===== Public APIs =====
     def display(self) -> None:
+        """ノートブックにUIを表示"""
         display(self._ui)
 
-    # --- 更新API ---
     def mark(self, label: str, checked: bool = True) -> bool:
-        cb = next((cb for cb in self._steps if cb.description == label), None)
+        """
+        指定ラベルのチェックON/OFF。
+        返り値: 更新できたら True（見つからなければ False）
+        """
+        cb = next((c for c in self._steps if c.description == label), None)
         if cb is None:
             return False
         cb.value = bool(checked)
         return True
 
     def set_progress(self, value: int) -> None:
+        """進行度を更新（0..progress_max）"""
         v = max(self._progress.min, min(self._progress.max, int(value)))
         self._progress.value = v
-        percent = int(round(100 * v / max(1, self._progress.max)))
-        self._progress_label.value = f"進行度: {v}/{self._progress.max} ({percent}%)"
+        self._label.value = self._label_text(v)
 
     def reset(self) -> None:
-        for cb in self._steps:
-            cb.value = False
+        """全チェックOFF & 進行度0"""
+        for c in self._steps:
+            c.value = False
         self.set_progress(0)
+
+    def is_done(self, label: str) -> Optional[bool]:
+        """指定ラベルのチェック状態（見つからなければ None）"""
+        cb = next((c for c in self._steps if c.description == label), None)
+        return None if cb is None else bool(cb.value)
+
+    # ===== Internal =====
+    def _label_text(self, v: int) -> str:
+        pct = int(round(100 * v / max(1, self._progress.max)))
+        return f"進行度: {v}/{self._progress.max} ({pct}%)"

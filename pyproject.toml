@@ -3,11 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ibl-utils"        # pip install ibl-utils
+name = "ibl-utils"
 version = "0.1.0"
 description = "utils.stepcheck extension"
 requires-python = ">=3.9"
 dependencies = ["ipywidgets>=8"]
 
-[tool.hatch.build]
-packages = [{ include = "utils" }]
+[tool.hatch.build.targets.wheel]
+packages = ["utils"]
